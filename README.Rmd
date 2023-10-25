@@ -1,0 +1,180 @@
+--- 
+title: "Case studies with mrgsolve: PBPK and QSP model implementation and utilization in R"
+date: ""
+author: ""
+output:
+  github_document:
+    toc: false
+---
+
+```{r global, message = FALSE, echo = FALSE, warning = FALSE}
+library(mrgsolve)
+library(tidyverse)
+library(PKPDmisc)
+library(pmplots)
+knitr::opts_chunk$set(fig.path = "docs/img/README-", message = FALSE, warning = FALSE)
+```
+
+## Where / when
+
+- __University at Buffalo__
+    - 2018 CDSE Days (Buffalo, NY)
+    - Tuesday, 10 April 9:30 am to 12:30 pm
+- __University of Florida__
+    - College of Pharmacy (Orlando Lake Nona Campus) 
+    - Saturday, 24 March 1:30 pm to 5:30 pm
+
+## Case Studies
+
+Please see the reading list below for references for the case studies
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 7, fig.width = 9}
+
+mod <- mread("rifampicin_midazolam", "docs/models") %>% param(WT = 90)
+
+
+rif <- ev(amt = 75, ii = 24, addl = 6, cmt = 1)
+mid <- ev(amt = 3, cmt = 2)
+
+comb <- ev_seq(rif, wait = -12, mid)
+mono <- filter(as.data.frame(comb), cmt==2) %>% as.ev
+
+out1 <- 
+  mrgsim(mod, events = comb, delta = 0.1, end = 240) %>%
+  mutate(tx = 2)
+
+out2 <- 
+  mrgsim(mod, events = mono, delta = 0.1, end = 240) %>% 
+  mutate(tx = 1)
+
+sims <- bind_rows(out1,out2) %>% 
+  mutate(tx = factor(
+    tx, labels = c("No Rifampicin", "Rifampicin Pretreatment x7d")
+  ))
+
+
+simddi <- filter(sims,time >= 156 & time <= 166) %>%
+  mutate(time = time - min(time))
+
+lab <- tribble(~x, ~y, ~text,
+               1, 0.3, "midazolam after\nrifampin x7d", 
+               1, 7, "midazolam")
+               
+
+p1<- ggplot(simddi) + 
+  geom_line(lwd = 1.25, aes(time,Cmidazolam, col = factor(tx)))  + 
+  scale_color_brewer(palette="Set2", name = "") +
+  xlab("Time after dose (hours)") + 
+  theme_bw() + theme(legend.position = "none") +
+  scale_x_continuous(breaks=seq(0,10,2)) +
+  scale_y_continuous(trans = "log10", 
+                     name = "Midazolam concentration (ng/mL)",
+                     breaks = 10^seq(-4,4), 
+                     limits = c(0.1, 10)) + 
+  geom_text(data = lab, aes(x = x, y = y, label = text), hjust = "left", size = 3.5 ) +
+  labs(subtitle = "Rifampin / midazolam DDI")
+
+
+out <- 
+  mod %>%
+  ev(amt = 600, ii = 24, addl = 9) %>%
+  mrgsim(end = 10*24, delta = 0.1) %>%
+  mutate(DAY = floor(time/24)+1) %>%
+  group_by(DAY) %>%
+  summarise(AUC = auc_partial(time,Ccentral)) %>%
+  mutate(AUC_pct = 100*AUC/first(AUC)) %>%
+  filter(DAY <=10)
+
+p2 <- 
+  ggplot(out, aes(DAY,AUC_pct)) + 
+  geom_col(alpha = 0.6) + theme_bw() + 
+  geom_hline(yintercept = 70, lty = 2, col = "darkslateblue", lwd = 1) + 
+  labs(x = "Daily dose number", y = "AUC (% of day 1 AUC)",
+       subtitle = "Autoinduction of rifampin metabolism by CYP3A4") + 
+  scale_x_continuous(breaks = seq(1,10,1)) + 
+  scale_y_continuous(breaks = seq(0,100,10)) 
+
+
+mod <- mread_cache("mapk", "docs/models")
+vp <- readRDS("docs/data/s10vpop_pk.RDS")
+mod <- update(mod, param = filter(vp,VPOP2==19))
+e <- ev(amt = 400, ii = 1, addl = 20, cmt = 12)
+e <- ev_seq(e, wait = 7, e)
+
+out <-
+  mod %>%
+  ev(e) %>%
+  mrgsim_df(end = 56, delta = 0.1) 
+
+outm <- gather(out, variable, value, c(ERKi, TUMOR))
+
+p3 <- ggplot(outm, aes(time,(value))) + 
+  geom_line(lwd = 1, col = "darkslateblue") + 
+  facet_wrap(~variable, scales = "free_y", ncol = 1) + 
+  theme_bw() + 
+  scale_x_continuous(breaks = seq(0,56,7), name = "Time (days)") + 
+  theme(legend.position = "bottom") + 
+  labs(y = "", subtitle = "ERK inhibtion in colorectal cancer")
+
+
+
+p4 <- readRDS("docs/img/README_osteo.RDS")
+
+mrggsave::mrggpage(list(p1,p2,p3,p4)) %>% mrggsave::mrggdraw()
+```
+
+
+
+__QSP Models__
+
+- [ERK inhibition in BRAF(V600E) mutant colorectal cancer](docs/mapk_inhibitors_in_colorectal_cancer.md)
+- [OpenBoneMin: Bone marker and BMD changes under denosumab therapy](docs/OpenBoneMin.md)
+
+__PBPK Models__
+
+- [PBPK model for rifampicin / midazolam DDI](docs/rifampin_midazolam_ddi.md)
+- [Parameter optimization in PBPK model for statin/CsA DDI](docs/oatp_ddi_optimization.md)
+
+__Methods__
+
+- [Global sensitivity analysis](docs/global_sensitivity_analysis.md)
+
+## Reading List
+
+- __Quantitative Analyses of Hepatic OATP-Mediated Interactions Between 
+  Statins and Inhibitors Using PBPK Modeling With a Parameter Optimization 
+  Method__
+    - Yoshikado T, Yoshida K, Kotani N, Nakada T, Asaumi R, Toshimoto K, Maeda K,
+      Kusuhara H, Sugiyama Y. Clin Pharmacol Ther. 2016 Nov;100(5):513-523. 
+      PMID: 27170342
+    - https://www.ncbi.nlm.nih.gov/pubmed/27170342
+
+- __Comprehensive PBPK Model of Rifampicin for Quantitative Prediction of
+Complex Drug-Drug Interactions: CYP3A/2C9 Induction and OATP Inhibition Effects__
+    - Asaumi R, Toshimoto K, Tobe Y, Hashizume K, Nunoya KI, Imawaka H, Lee W,
+      Sugiyama Y.  CPT Pharmacometrics Syst Pharmacol. 2018 Jan 25. 
+      PMID: 29368402
+      - https://www.ncbi.nlm.nih.gov/pubmed/29368402
+
+- __Clinical responses to ERK inhibition in BRAF(V600E)-mutant
+colorectal cancer predicted using a computational model__
+    - Kirouac DC, Schaefer G, Chan J, Merchant M, Orr C, Huang SA, Moffat J, Liu L, 
+      Gadkar K, Ramanujan S.  NPJ Syst Biol Appl. 2017 Jun 2;3:14. 
+      PubMed PMID: 28649441
+    - https://www.ncbi.nlm.nih.gov/pubmed/28649441
+
+- __Predicting nonlinear changes in bone mineral density
+over time using a multiscale systems pharmacology model__
+    -  Peterson MC, Riggs MM. CPT Pharmacometrics Syst
+       Pharmacol. 2012 Nov 14;1:e14. 
+       PMID: 23835796
+    - https://www.ncbi.nlm.nih.gov/pubmed/23835796
+
+- __Sobol Sensitivity Analysis: A Tool to Guide the Development and Evaluation 
+of Systems Pharmacology Models__
+    - Zhang XY, Trame MN, Lesko LJ, Schmidt S. . CPT
+      Pharmacometrics Syst Pharmacol. 2015 Feb;4(2):69-79.  
+      PMID: 27548289
+    - https://www.ncbi.nlm.nih.gov/pubmed/27548289
+    
+    
